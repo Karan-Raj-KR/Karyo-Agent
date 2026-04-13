@@ -1,0 +1,29 @@
+[project]
+name = "karyo-agent"
+version = "0.1.0"
+description = "KĀRYO Lead Intelligence Agent — multi-agent lead generation for digital agencies"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "crewai>=0.80.0",
+    "groq>=0.11.0",
+    "openai>=1.50.0",
+    "pydantic>=2.9.0",
+    "diskcache>=5.6.0",
+    "rich>=13.9.0",
+    "requests>=2.32.0",
+    "beautifulsoup4>=4.12.0",
+    "python-whois>=0.9.0",
+    "googlemaps>=4.10.0",
+    "python-dotenv>=1.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["karyo"]
+
+[tool.uv]
+dev-dependencies = []

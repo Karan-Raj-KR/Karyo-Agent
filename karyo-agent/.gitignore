@@ -1,0 +1,12 @@
+.env
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+cache/
+outputs/leads.csv
+outputs/emails/*.txt
+*.egg-info/
+dist/
+.uv/

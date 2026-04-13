@@ -1,0 +1,2 @@
+name,address,phone,website,website_status,has_ssl,domain_age_years,google_rating,review_count,presence_gap_score,conversion_likelihood,combined_score,primary_gap,flag,manager_reason
+Smile Dental Clinic,"12, MG Road, Indiranagar",+91 80 2345 6789,http://smiledentalclinic.in,slow,False,3.2,4.2,87,9,7,16,Slow website + No SSL + No Instagram,approve,Combined score 16/20 — Slow website + No SSL + No Instagram. Strong digital gap; high priority lead.

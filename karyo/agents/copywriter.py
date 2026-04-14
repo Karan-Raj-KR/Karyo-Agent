@@ -17,65 +17,81 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-_PROMPT = (Path(__file__).parents[2] / "prompts" / "copywriter.md").read_text()
+_SYSTEM_PROMPT = (Path(__file__).parents[2] / "prompts" / "copywriter.md").read_text()
+_GROQ_MODEL    = "llama-3.3-70b-versatile"
+_TEMPERATURE   = 0.75   # enough variation; not so high it ignores rules
 
-_GROQ_MODEL  = "llama-3.3-70b-versatile"
-_TEMPERATURE = 0.7   # higher than scorer — we want creative variation
-
-
-# ── dossier context builder ────────────────────────────────────────────────────
-
-def _lead_context(lead: FinalLead) -> str:
-    """Return a structured text block the LLM uses to personalise the email."""
-    d = lead.dossier
-    s = lead.score
-
-    lines = [
-        f"Business name   : {d.name}",
-        f"Address         : {d.address}",
-        f"Phone           : {d.phone or 'NOT LISTED — no phone anywhere online'}",
-        f"Website         : {d.website or 'NONE — business has no website'}",
-        f"Website status  : {d.website_status}",
-        f"Has SSL         : {d.has_ssl}",
-        f"Domain age      : {f'{d.domain_age_years} years' if d.domain_age_years else 'N/A'}",
-        f"Google rating   : {d.google_rating or 'unknown'}",
-        f"Review count    : {d.review_count}",
-        f"Primary gap     : {s.primary_gap}",
-        f"Presence gap    : {s.presence_gap_score}/10",
-        f"Conv likelihood : {s.conversion_likelihood}/10",
-        f"Research notes  :",
-    ]
-    for note in d.research_notes:
-        lines.append(f"  - {note}")
-    return "\n".join(lines)
+_WORD_MIN, _WORD_MAX = 100, 140
 
 
-# ── strip markdown if LLM wraps in code fences ────────────────────────────────
+# ── helpers ────────────────────────────────────────────────────────────────────
+
+def _body_word_count(email: str) -> int:
+    """Count words in the body only (between 'Hi ' and 'Best,')."""
+    m = re.search(r"Hi .+?\n(.+?)(?=\nBest,|\nRegards,|\Z)", email, re.DOTALL)
+    text = m.group(1) if m else email
+    return len(text.split())
+
 
 def _clean(text: str) -> str:
+    """Strip markdown code fences if the LLM wrapped its output."""
     text = text.strip()
     text = re.sub(r"^```[a-z]*\s*", "", text, flags=re.IGNORECASE)
     text = re.sub(r"\s*```$", "", text)
     return text.strip()
 
 
-# ── real Groq email writer ─────────────────────────────────────────────────────
+def _lead_context(lead: FinalLead) -> str:
+    """Format the dossier as labelled key-value pairs for the LLM."""
+    d = lead.dossier
+    s = lead.score
+    lines = [
+        f"Business name    : {d.name}",
+        f"Category         : dental clinic",
+        f"Address          : {d.address}",
+        f"Phone            : {d.phone or 'NOT LISTED — no phone anywhere online'}",
+        f"Website          : {d.website or 'NONE'}",
+        f"Website status   : {d.website_status}",
+        f"Has SSL          : {d.has_ssl}",
+        f"Domain age       : {f'{d.domain_age_years} years' if d.domain_age_years else 'N/A'}",
+        f"Google rating    : {d.google_rating or 'unknown'}",
+        f"Review count     : {d.review_count}",
+        f"Primary gap      : {s.primary_gap}",
+        f"Research notes   :",
+    ]
+    for note in d.research_notes:
+        lines.append(f"  - {note}")
+    return "\n".join(lines)
+
+
+def _call_groq(client, messages: list[dict]) -> str:
+    resp = client.chat.completions.create(
+        model=_GROQ_MODEL,
+        messages=messages,
+        temperature=_TEMPERATURE,
+        max_tokens=450,
+    )
+    return _clean(resp.choices[0].message.content or "")
+
+
+# ── main public function ───────────────────────────────────────────────────────
 
 def real_copy(lead: FinalLead) -> str:
     """
-    Generate a personalised cold-outreach email via Groq.
+    Generate a 100-140 word personalised cold-outreach email via Groq.
 
-    Falls back to stub_copy() if no API key.
-    Result is cached by (business_name, dossier_hash) — re-generated if dossier changes.
+    - Cache key: (business_name, primary_gap) — stable across re-research runs
+    - Validates word count; retries once with explicit correction instruction
+    - Falls back to stub_copy() if no API key
     """
     groq_key = os.getenv("GROQ_API_KEY", "").strip()
     if not groq_key:
         log.warning("[copywriter] No GROQ_API_KEY — using stub fallback")
         return stub_copy(lead)
 
-    store    = get_store()
+    store     = get_store()
     cache_key = store.make_key(
-        "copywriter_v2", lead.dossier.name, lead.dossier.model_dump_json()
+        "copywriter_v3", lead.dossier.name, lead.score.primary_gap
     )
     cached = store.get(cache_key)
     if cached is not None:
@@ -85,28 +101,47 @@ def real_copy(lead: FinalLead) -> str:
     from groq import Groq
     client = Groq(api_key=groq_key)
 
+    context = _lead_context(lead)
     user_msg = (
-        "Write a cold outreach email for this lead. Follow every rule in your "
-        "instructions — especially the ABSOLUTE BANS. Use the dossier data below "
-        "to make the email specific to THIS business. Do not copy phrases from "
-        "other emails you may have written.\n\n"
-        f"{_lead_context(lead)}"
+        "Write a cold outreach email for the following lead. "
+        "Follow EVERY rule in your instructions — especially word count and the hard rules.\n\n"
+        f"{context}"
     )
+    messages: list[dict] = [
+        {"role": "system", "content": _SYSTEM_PROMPT},
+        {"role": "user",   "content": user_msg},
+    ]
 
+    # ── attempt 1 ─────────────────────────────────────────────────────────────
     try:
-        resp = client.chat.completions.create(
-            model=_GROQ_MODEL,
-            messages=[
-                {"role": "system", "content": _PROMPT},
-                {"role": "user",   "content": user_msg},
-            ],
-            temperature=_TEMPERATURE,
-            max_tokens=400,
-        )
-        email = _clean(resp.choices[0].message.content or "")
+        email = _call_groq(client, messages)
     except Exception as exc:
         log.warning("[copywriter] Groq error for %s: %s", lead.dossier.name, exc)
         return stub_copy(lead)
+
+    wc = _body_word_count(email)
+    log.info("[copywriter] %s — attempt 1: %d words", lead.dossier.name, wc)
+
+    # ── retry if word count outside 100-140 ───────────────────────────────────
+    if not (_WORD_MIN <= wc <= _WORD_MAX):
+        direction = "shorter" if wc > _WORD_MAX else "longer"
+        retry_messages = messages + [
+            {"role": "assistant", "content": email},
+            {
+                "role": "user",
+                "content": (
+                    f"The body is {wc} words. It must be exactly {_WORD_MIN}–{_WORD_MAX} words. "
+                    f"Rewrite it to be {direction}, keeping every hard rule. "
+                    f"Return only the full email — no explanation."
+                ),
+            },
+        ]
+        try:
+            email = _call_groq(client, retry_messages)
+            wc = _body_word_count(email)
+            log.info("[copywriter] %s — retry: %d words", lead.dossier.name, wc)
+        except Exception as exc:
+            log.warning("[copywriter] retry error for %s: %s", lead.dossier.name, exc)
 
     store.set(cache_key, email)
     return email
@@ -118,10 +153,10 @@ def get_copywriter_agent(llm: "LLM") -> Agent:
     return Agent(
         role="Outreach Copywriter",
         goal=(
-            "Write concise, personalised cold-outreach emails that highlight "
-            "specific digital gaps and position KĀRYO as the clear solution."
+            "Write 100-140 word personalised cold-outreach emails in KĀRYO's voice "
+            "that reference specific digital gaps and end with a low-commitment ask."
         ),
-        backstory=_PROMPT,
+        backstory=_SYSTEM_PROMPT,
         tools=[],
         llm=llm,
         allow_delegation=False,
@@ -135,31 +170,36 @@ def stub_copy(lead: FinalLead) -> str:
     """Deterministic template — used only when no API key is set."""
     d = lead.dossier
     s = lead.score
-    gap = s.primary_gap or "no digital presence"
+    gap  = s.primary_gap or "no digital presence"
 
-    opener = (
-        f"{d.name} has no website in 2026 — invisible to every patient searching online."
-        if d.website_status == "none"
-        else f"The website at {d.website} is currently unreachable — patients clicking it leave immediately."
-        if d.website_status == "dead"
-        else f"{d.name} loads in over 3 seconds — most mobile users won't wait."
+    if d.website_status == "none":
+        line1 = f"{d.name} has no website — invisible to every patient searching online."
+    elif d.website_status == "dead":
+        line1 = f"The website at {d.website} is unreachable — patients clicking it bounce immediately."
+    else:
+        line1 = f"{d.name} loads slowly — most mobile users won't wait."
+
+    extra = (
+        "Zero reviews means patients have no social proof to trust the practice."
+        if d.review_count == 0
+        else f"With only {d.review_count} reviews, online credibility is still low."
     )
 
     return (
-        f"Subject: {d.name} — quick question\n"
+        f"Subject: {d.name} — are new patients finding you?\n"
         "\n"
-        f"Hi {d.name} Team,\n"
+        f"Hi {d.name},\n"
         "\n"
-        f"{opener}\n"
+        f"{line1} The core gap: {gap}.\n"
+        f"{extra} In Indiranagar's competitive dental market, "
+        "that means patients go elsewhere.\n"
         "\n"
-        f"The core issue: {gap}. "
-        "In Indiranagar's competitive dental market that means patients go elsewhere.\n"
+        "KĀRYO Digital helps dental clinics in Bangalore build a presence that "
+        "converts — website, local SEO, and trust signals, usually live in 3 weeks.\n"
         "\n"
-        "We fix this for local clinics — usually live within 3 weeks.\n"
-        "\n"
-        "Worth a 5-minute call this week?\n"
+        "Would a 15-min call this week work?\n"
         "\n"
         "Best,\n"
-        "Karan | KĀRYO Digital\n"
-        "karan@karyo.in | +91 98765 43210"
+        "Karan & Havinash\n"
+        "KĀRYO Digital, Bangalore"
     )

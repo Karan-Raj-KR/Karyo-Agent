@@ -19,7 +19,7 @@ from karyo.models.schemas import (
     LeadScore,
     ManagerDecision,
 )
-from karyo.ui.console import print_agent_start
+from karyo.ui.console import print_agent_start, print_email_panel
 
 
 # ---------------------------------------------------------------------------
@@ -119,9 +119,12 @@ class KaryoCrew:
 
         # 4. Copywriter — stub email for each approved lead
         print_agent_start("Copywriter")
+        from karyo.agents.copywriter import _body_word_count
         emails: dict[str, str] = {}
         for lead in final_leads:
-            emails[lead.dossier.name] = real_copy(lead)
+            email = real_copy(lead)
+            emails[lead.dossier.name] = email
+            print_email_panel(lead.dossier.name, email, _body_word_count(email))
 
         return PipelineResult(
             final_leads=final_leads,

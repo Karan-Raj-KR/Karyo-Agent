@@ -107,6 +107,18 @@ def print_final_table(leads: list[FinalLead]) -> None:
     console.print(table)
 
 
+def print_email_panel(business_name: str, email_text: str, word_count: int) -> None:
+    """Print a generated email inside a green panel with word count."""
+    console.print(
+        Panel(
+            email_text,
+            title=f"[bold green]✉  {business_name}[/]  [dim]({word_count} words)[/]",
+            border_style="green",
+            padding=(1, 2),
+        )
+    )
+
+
 def print_outputs_written(csv_path: str, email_count: int) -> None:
     console.print(
         Panel(

@@ -19,7 +19,6 @@ from karyo.models.schemas import (
     LeadScore,
     ManagerDecision,
 )
-from karyo.tools.places import fetch_places
 from karyo.ui.console import (
     print_agent_start,
     print_manager_decision,
@@ -92,17 +91,16 @@ class KaryoCrew:
     # ------------------------------------------------------------------
 
     def _run_stub_pipeline(self) -> PipelineResult:
-        from karyo.agents.researcher import stub_research
+        from karyo.agents.researcher import real_research
         from karyo.agents.scorer import stub_score
         from karyo.agents.manager import stub_decide
         from karyo.agents.copywriter import stub_copy
 
-        # 1. Researcher
+        # 1. Researcher — real tool calls (places + website + WHOIS)
         print_agent_start("Researcher")
-        businesses = fetch_places(self.city, self.category)
-        dossiers: list[BusinessDossier] = [
-            stub_research(b, self.city) for b in businesses
-        ]
+        dossiers: list[BusinessDossier] = real_research(
+            city=self.city, category=self.category
+        )
 
         # 2. Scorer
         print_agent_start("Scorer")
@@ -154,7 +152,7 @@ class KaryoCrew:
         research_task = Task(
             description=(
                 f"Research {self.category} businesses in {self.city}. "
-                "Use the google_places_search tool to find candidates, then "
+                "Use the osm_places_search tool to find candidates, then "
                 "run website_health_check and domain_age_lookup on each. "
                 "Return a JSON list of BusinessDossier objects."
             ),

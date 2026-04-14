@@ -204,7 +204,11 @@ class RealManager:
                 )
                 decisions.append(dec)
                 approvals.append(
-                    FinalLead(dossier=dossier, score=score, manager_reason=reason)
+                    FinalLead(
+                        dossier=dossier,
+                        score=score.model_copy(update={"flag": "approve"}),
+                        manager_reason=reason,
+                    )
                 )
                 print_manager_decision(dec)
                 run_log.append(_log_entry(ts, dossier, score, "approve", 1, reason))
@@ -273,7 +277,11 @@ class RealManager:
                     f"(post-verification gate). {new_score.reasoning}"
                 )
                 approvals.append(
-                    FinalLead(dossier=updated, score=new_score, manager_reason=reason)
+                    FinalLead(
+                        dossier=updated,
+                        score=new_score.model_copy(update={"flag": "approve"}),
+                        manager_reason=reason,
+                    )
                 )
             elif new_score.combined_score <= _AUTO_REJECT_THRESHOLD:
                 action = "reject"

@@ -98,7 +98,7 @@ class KaryoCrew:
         from karyo.agents.researcher import real_research
         from karyo.agents.scorer import real_score_all
         from karyo.agents.manager import RealManager
-        from karyo.agents.copywriter import stub_copy
+        from karyo.agents.copywriter import real_copy
 
         mode = "live" if os.getenv("GROQ_API_KEY", "").strip() else "stub"
 
@@ -121,7 +121,7 @@ class KaryoCrew:
         print_agent_start("Copywriter")
         emails: dict[str, str] = {}
         for lead in final_leads:
-            emails[lead.dossier.name] = stub_copy(lead)
+            emails[lead.dossier.name] = real_copy(lead)
 
         return PipelineResult(
             final_leads=final_leads,

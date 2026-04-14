@@ -81,30 +81,38 @@ class KaryoCrew:
     # ------------------------------------------------------------------
 
     def kickoff(self) -> PipelineResult:
-        if self.llm is None:
-            print("[crew] No API keys found — running in STUB mode.")
-            return self._run_stub_pipeline()
-        return self._run_crew_pipeline()
+        # Always run the direct pipeline:
+        #   Researcher  — real OSM + website + WHOIS tool calls
+        #   Scorer      — real Groq LLM call (falls back to stub if no key)
+        #   Manager     — stub decisions (full CrewAI orchestration deferred)
+        #   Copywriter  — stub email (full CrewAI orchestration deferred)
+        #
+        # The full hierarchical CrewAI crew (_run_crew_pipeline) is wired and
+        # available for when all four agents are real-LLM-ready.
+        return self._run_pipeline()
 
     # ------------------------------------------------------------------
-    # Stub pipeline (no LLM required)
+    # Main pipeline
     # ------------------------------------------------------------------
 
-    def _run_stub_pipeline(self) -> PipelineResult:
+    def _run_pipeline(self) -> PipelineResult:
         from karyo.agents.researcher import real_research
-        from karyo.agents.scorer import stub_score
+        from karyo.agents.scorer import real_score_all
         from karyo.agents.manager import stub_decide
         from karyo.agents.copywriter import stub_copy
 
-        # 1. Researcher — real tool calls (places + website + WHOIS)
+        import os
+        mode = "live" if os.getenv("GROQ_API_KEY", "").strip() else "stub"
+
+        # 1. Researcher — real OSM + website + WHOIS
         print_agent_start("Researcher")
         dossiers: list[BusinessDossier] = real_research(
             city=self.city, category=self.category
         )
 
-        # 2. Scorer
+        # 2. Scorer — real Groq LLM per business (stub fallback if no key)
         print_agent_start("Scorer")
-        scores: list[LeadScore] = [stub_score(d) for d in dossiers]
+        scores: list[LeadScore] = real_score_all(dossiers)
 
         # 3. Manager decides
         print_agent_start("Manager")
@@ -113,13 +121,19 @@ class KaryoCrew:
             print_manager_decision(decision)
 
         # 4. Copywriter — only for approved leads
+        # Use name-keyed lookup so skipped businesses don't misalign the zip
         print_agent_start("Copywriter")
-        approved_names = {d.business_name for d in decisions if d.action == "approve"}
+        dossier_by_name  = {d.name: d for d in dossiers}
+        decision_by_name = {dec.business_name: dec for dec in decisions}
 
         final_leads: list[FinalLead] = []
         emails: dict[str, str] = {}
 
-        for dossier, score, decision in zip(dossiers, scores, decisions):
+        for score in scores:
+            dossier  = dossier_by_name.get(score.business_name)
+            decision = decision_by_name.get(score.business_name)
+            if dossier is None or decision is None:
+                continue
             if decision.action == "approve":
                 lead = FinalLead(
                     dossier=dossier,
@@ -130,7 +144,7 @@ class KaryoCrew:
                 final_leads.append(lead)
                 emails[dossier.name] = email
 
-        return PipelineResult(final_leads=final_leads, emails=emails, mode="stub")
+        return PipelineResult(final_leads=final_leads, emails=emails, mode=mode)
 
     # ------------------------------------------------------------------
     # Live CrewAI pipeline

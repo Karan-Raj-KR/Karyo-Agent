@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import re
 import sys
 from pathlib import Path
@@ -112,6 +113,14 @@ def main() -> None:
     _write_csv(result.final_leads, csv_path)
     _write_emails(result.emails, emails_dir)
 
+    # Write run_log.json
+    log_path = base / "run_log.json"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text(
+        json.dumps(result.run_log, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
     # Rich summary
     if result.final_leads:
         print_final_table(result.final_leads)
@@ -121,7 +130,8 @@ def main() -> None:
     print_outputs_written(str(csv_path), len(result.emails))
     console.print(
         f"\n[dim]Mode: {result.mode} | "
-        f"{len(result.final_leads)} approved lead(s)[/]\n"
+        f"{len(result.final_leads)} approved lead(s) | "
+        f"run_log → {log_path}[/]\n"
     )
 
 

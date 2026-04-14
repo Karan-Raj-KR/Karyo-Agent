@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from rich.console import Console
 from rich.panel import Panel
+from rich.rule import Rule
 from rich.table import Table
-from rich.text import Text
 from rich import box
 
 from karyo.models.schemas import FinalLead, ManagerDecision
@@ -40,6 +40,13 @@ def print_agent_start(agent_name: str) -> None:
             expand=False,
         )
     )
+
+
+def print_manager_phase(phase: str) -> None:
+    """Print a horizontal rule that labels a Manager decision pass."""
+    console.print()
+    console.print(Rule(f"[bold magenta]{phase}[/]", style="magenta"))
+    console.print()
 
 
 def print_manager_decision(decision: ManagerDecision) -> None:

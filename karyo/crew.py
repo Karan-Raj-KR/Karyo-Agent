@@ -19,10 +19,7 @@ from karyo.models.schemas import (
     LeadScore,
     ManagerDecision,
 )
-from karyo.ui.console import (
-    print_agent_start,
-    print_manager_decision,
-)
+from karyo.ui.console import print_agent_start
 
 
 # ---------------------------------------------------------------------------
@@ -33,6 +30,8 @@ from karyo.ui.console import (
 class PipelineResult:
     final_leads: list[FinalLead] = field(default_factory=list)
     emails: dict[str, str] = field(default_factory=dict)
+    decisions: list[ManagerDecision] = field(default_factory=list)
+    run_log: list[dict] = field(default_factory=list)
     mode: str = "stub"
 
 
@@ -98,10 +97,9 @@ class KaryoCrew:
     def _run_pipeline(self) -> PipelineResult:
         from karyo.agents.researcher import real_research
         from karyo.agents.scorer import real_score_all
-        from karyo.agents.manager import stub_decide
+        from karyo.agents.manager import RealManager
         from karyo.agents.copywriter import stub_copy
 
-        import os
         mode = "live" if os.getenv("GROQ_API_KEY", "").strip() else "stub"
 
         # 1. Researcher — real OSM + website + WHOIS
@@ -114,37 +112,24 @@ class KaryoCrew:
         print_agent_start("Scorer")
         scores: list[LeadScore] = real_score_all(dossiers)
 
-        # 3. Manager decides
+        # 3. Manager — self-correction loop (pass 1 → borderline → pass 2)
         print_agent_start("Manager")
-        decisions: list[ManagerDecision] = stub_decide(scores)
-        for decision in decisions:
-            print_manager_decision(decision)
+        manager = RealManager()
+        final_leads, decisions, run_log = manager.run(scores, dossiers)
 
-        # 4. Copywriter — only for approved leads
-        # Use name-keyed lookup so skipped businesses don't misalign the zip
+        # 4. Copywriter — stub email for each approved lead
         print_agent_start("Copywriter")
-        dossier_by_name  = {d.name: d for d in dossiers}
-        decision_by_name = {dec.business_name: dec for dec in decisions}
-
-        final_leads: list[FinalLead] = []
         emails: dict[str, str] = {}
+        for lead in final_leads:
+            emails[lead.dossier.name] = stub_copy(lead)
 
-        for score in scores:
-            dossier  = dossier_by_name.get(score.business_name)
-            decision = decision_by_name.get(score.business_name)
-            if dossier is None or decision is None:
-                continue
-            if decision.action == "approve":
-                lead = FinalLead(
-                    dossier=dossier,
-                    score=score,
-                    manager_reason=decision.reason,
-                )
-                email = stub_copy(lead)
-                final_leads.append(lead)
-                emails[dossier.name] = email
-
-        return PipelineResult(final_leads=final_leads, emails=emails, mode=mode)
+        return PipelineResult(
+            final_leads=final_leads,
+            emails=emails,
+            decisions=decisions,
+            run_log=run_log,
+            mode=mode,
+        )
 
     # ------------------------------------------------------------------
     # Live CrewAI pipeline

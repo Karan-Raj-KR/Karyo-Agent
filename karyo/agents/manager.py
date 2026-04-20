@@ -155,7 +155,7 @@ class RealManager:
     """
 
     def __init__(self) -> None:
-        self.groq_key = os.getenv("GROQ_API_KEY", "").strip()
+        self.groq_key = os.getenv("GROQ_API_KEY", "").stripe()
         self.store    = get_store()
         if self.groq_key:
             from groq import Groq
